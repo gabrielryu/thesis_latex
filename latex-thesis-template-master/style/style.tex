@@ -155,8 +155,9 @@
 
 % 2018-10-16 - changed to use Bibtex instead
 
-%\usepackage[style=numeric,natbib=true,backend=biber]{biblatex}
 
+%\usepackage[style=numeric,natbib=true,backend=biber]{biblatex}
+%\addbibresource{bib.bib}
 % apparently no effect?
 %\renewcommand{\bibsetup}{
 %	\markboth{
@@ -180,7 +181,6 @@
 %
 %\defbibfilter{offline}{%
 %  \( \not \type{online} \)}
-%
 %\bibliography{Bibliography}
 
 
@@ -395,19 +395,21 @@ sensitive=false, morecomment=[s]{<!--}{-->}, morestring=[b]", morestring=[d]'}
 \usepackage{calc}
 \usepackage{fancyhdr}
 \pagestyle{fancy}
+%\pagestyle{plain}
 \fancyhfoffset[RO,LE]{0.1cm} %{\marginparsep+\marginparwidth}
 \fancyhfoffset[RE,LO]{0.1cm}
 %\fancyheadoffset[RE,LO]{\hoffset + \oddsidemargin}
 \renewcommand{\headrule}{{\color{Black}%
   \hrule width\headwidth height\headrulewidth \vskip-\headrulewidth}}
 \fancyhf{}
-\fancyhead[RE]{\slshape \nouppercase{\leftmark}}    % Even page header: "page   chapter"
-\fancyhead[LO]{\slshape \nouppercase{\rightmark}}   % Odd  page header: "section   page"
+%\fancyhead[RE]{\slshape \nouppercase{\leftmark}}    % Even page header: "page   chapter"  == I CHANGED
+%\fancyhead[LO]{\slshape \nouppercase{\rightmark}}   % Odd  page header: "section   page" == I CHANGED
 \fancyhead[RO,LE]{\bfseries \thepage}
 
 %- \fancyfoot[LE]{\STYLEleftpicture}
 %- \fancyfoot[RO]{\STYLErightpicture}
 \fancyfoot[LE]{\STYLEfootnotetext}
+\fancyfoot[RO]{\STYLEfootnotetext}
 
 \renewcommand{\headrulewidth}{1pt}    % Underline headers
 \renewcommand{\footrulewidth}{0pt}
@@ -421,6 +423,7 @@ sensitive=false, morecomment=[s]{<!--}{-->}, morestring=[b]", morestring=[d]'}
 % Font style and colors
 \addtokomafont{part}{\Huge\allsectionformat}
 \addtokomafont{chapter}{\Huge\allsectionformat}
+%\addtokomafont{chapter}{\allsectionformat}
 \addtokomafont{section}{\allsectionformat}
 \addtokomafont{subsection}{\allsectionformat}
 \addtokomafont{subsubsection}{\allsectionformat}

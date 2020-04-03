@@ -42,52 +42,56 @@ TCP
 %make readable references
 \usepackage[pdftex,pdfpagelabels=true]{hyperref}
 \hypersetup{%
-	pdftitle={Thesis Title},
-	pdfauthor={Thesis Author},
-	pdfkeywords={key1, key2, key3},
-	pdfsubject={Thesis Subject}
+	pdftitle={Extending Secure Data Storage in Decentralized Networks},
+	pdfauthor={Youngrak Ryu},
+	%pdfkeywords={key1, key2, key3},
+	pdfsubject={Thesis Outline}
 }
 
 % Adding a finite stretch on the page suppresses "Underfull \vbox (badness 10000)" warnings.
-\makeatletter
-\def\@textbottom{\vskip \z@ \@plus 1pt}
-\let\@texttop\relax
-\makeatother
+%\makeatletter
+%\def\@textbottom{\vskip \z@ \@plus 1pt}
+%\let\@texttop\relax
+%\makeatother
+
 
 \begin{document}
 
 %--------------------------------------------------------------
 % FRONT PAGE AND DOCUMENT METADATA
 %--------------------------------------------------------------
-\frontmatter
+%\frontmatter
 
 \input{content/00_frontpages/00_frontpage}
-\input{content/00_frontpages/01_declaration}
-%\input{content/00_frontpages/02_acknowledgments}
-\input{content/00_frontpages/03_abstract}					% EN Abstract
-\input{content/00_frontpages/04_zusammenfassung}	% DE Abstract
+%\input{content/00_frontpages/01_declaration}
+%%\input{content/00_frontpages/02_acknowledgments}
+%\input{content/00_frontpages/03_abstract}					% EN Abstract
+%\input{content/00_frontpages/04_zusammenfassung}	% DE Abstract
 
-\tableofcontents{}
+%\tableofcontents{}
 
 %--------------------------------------------------------------
 % MAIN CONTENT
 %--------------------------------------------------------------
-\mainmatter
+%\mainmatter
 
 %\part{}						% optional: use parts to structure your thesis
 \input{content/outline}
-\input{content/01_introduction}
-\input{content/02_related_work}
-\input{content/03_concept_and_design}
-\input{content/04_implementation}
-\input{content/05_evaluation}
-\input{content/06_conclusion}
+
+%\input{content/01_introduction}
+%\input{content/02_related_work}
+%\input{content/03_concept_and_design}
+%\input{content/04_implementation}
+%\input{content/05_evaluation}
+%\input{content/06_conclusion}
 
 %--------------------------------------------------------------
 % TABLES, FIGURES, BIBLOGRAPHY AND APPENDICES
 %--------------------------------------------------------------
-\backmatter
 
+\backmatter
+%\printbibliography
+%\printbibliography
 % Lists of tables and figures
 \listoftables
 \listoffigures
@@ -99,6 +103,7 @@ TCP
 \bibliographystyle{IEEEtran}
 \bibliography{bibliography.bib}
 
+
 % Use following to separate online (websites) and offline (books, papers) sources
 %\printbibliography[heading=offline,filter=offline]
 %\printbibliography[heading=online,filter=online]
@@ -108,5 +113,4 @@ TCP
 	% \input{content/99_appendices/a02_listings}
 	% \input{content/99_appendices/a03_listings}
 \end{appendices}
-
 \end{document}
