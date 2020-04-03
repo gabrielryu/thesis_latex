@@ -1,17 +1,9 @@
 \documentclass{article}
 \usepackage[a4paper, total={6in, 8in}]{geometry}
-%\usepackage{geometry}
 \usepackage{amsmath}
 \usepackage{setspace}
 \usepackage{xcolor}
 \definecolor{DarkRed}{rgb}{0.7725490196,0.05490196078,0.12549019607} % new TU red
-% \geometry{
-% a4paper
- %total={170mm,257mm},
- %left=25mm,
-% top=25mm,
- %}
-%\documentclass{scrbook}
 \usepackage{courier}
 \usepackage[english]{babel}				% \usepackage[ngerman]{babel}
 \selectlanguage{english}				% \selectlanguage{ngerman}
@@ -21,55 +13,18 @@
 \usepackage{textcomp} 
 \makeatletter	
 \usepackage{units}		
-% =========================================================================
-% = GRAPHICS AND IMAGES
-% =========================================================================
-
-
 \usepackage{graphicx}
-\graphicspath{{images/}}				% path to your image folder
-
 \usepackage{eso-pic}					% needed for the full-face titlepage
-\usepackage{chngpage}				% we need this to determine if a figure is on an odd or even page
-\usepackage{tikz}					% tikz pictures
-
-% captions of tables and images
-\usepackage[hang,small,sf]{caption}
-\renewcommand{\captionfont}{\sffamily\small}
-\renewcommand{\captionlabelfont}{\bfseries}
-
-\usepackage{float}
-\usepackage{placeins}
-% \floatstyle{ruled}
-%\floatplacement
-
-%\renewcommand{\floatpagefraction}{0.85}		% if a figure takes more than 85% of a page it will be typeset on a separate page
-\usepackage[it,bf,tight,hang,raggedright]{subfigure}
-%\usepackage{biblatex}
-
-
-
-%\title{\huge \textbf {Thesis Outline}}
-%\author{\Large Youngrak Ryu}
-%\date{\Large \today}
+\usepackage{indentfirst}
 
 \begin{document}
 \input{titlepage}
-%\maketitle
-%\chapter{test}
-%{\Huge  \textbf {Thesis Outline}}\\
 
 {\huge  \textbf {Extending Secure Data Storage in Decentralized Networks}}\\
-%\counterwithout{section}{chapter}
 \section{State of the Art}
-%\counterwithout{section}{chapter}
-%\chapter{State of the Art}
-
 Most legacy network systems are composed as centralized architecture, in which the main system afford services to connected users. When users request any information, the frontend application takes over requests of the user and brings data from the connected server or backend application. This manner takes advantage of development and management. However, as the growing scale of the system, the centralized network encounters difficulties, that are a weakness of outside attack, e.g., network connection instability, DDoS, storage cost with rising scale, and sensitive data management. In contrast to the centralized network system, the decentralized network system has become a big trend to avoid the disadvantages of the centralized network. Distributed Ledger Technology is one of the decentralized network technologies, and is composed of nodes, which verify with the cryptographical identifier, then interconnect using the peer-to-peer network, and transmit data between nodes. The system to avoid data modification uses consensus algorithms for reliable nodes. Therefore nodes can be synchronized. A distributed hash table (DHT) \cite{sivaraja2008efficient} is a lookup service using key and value or list paired. Using encrypted key DHT can get exact values. With distinguish DHT characters, more use cases are extended (e.g., e-Wallet, Digital Identification, Distributed File System, and Peer-to-Peer file sharing). The decentralized storage to store data uses the distributed file system, e.g., InterPlanetary File System (IPFS) \cite{IPFS}\cite{benet2014ipfs}, BitTorrent File System (BTFS)\cite{BTFS}, Ethereum Swarm, and BigchainDB. The distributed file systems are characterized by sharing fragmented data as a chunk that is stored in nodes. IP based communication using TCP and UDP has protocol-level issues\cite{rfc791}\cite{rfc815}. Ethernet MTU allows the limitation for a maximum of 1500 bytes per packet. Therefore transmission systems set a limit to about 1000 bytes without the header space for system reliability\cite{ietf-intarea-frag-fragile-17}. Thus, St\aa x, which is based on a Kademlia DHT\cite{maymounkov2002kademlia}, that afford only UDP, consists of various interconnecting types of nodes, and the nodes transmit data through the HTTP-level P2P tunnel using UDP. When nodes make the transmission of mass data such as image and music, there still exist some protocol-level issues. To enable secure decentralized data storage requires comparison and analyzation between other systems. Furthermore, I would like to develop a framework with research findings, which will be applied to St\aa x's Kademlia DHT.
 
 \section{Problem}
-%\chapter{Problem}
-
 Nodes should interconnect using DHT, and nodes make a connection via P2P tunnel to enable data storage in decentralized networks. As establish P2P, between nodes have to verify credentials. Self-Sovereign Identity (SSI)\cite{tobin2016inevitable} will be applied in St\aa x and uses the Decentralized identifier (DID)\cite{sabadello2018introduction}. The framework will also implement SSI using DID. Transmission protocols such as TCP and UDP have the limitation of the size of a single packet, which is not able to send the over 1500 bytes packet. When the client transfers to another node data such as an image file, the transmission problem can occur. Because of this issue, the transmission uses Packet Fragmentation, which splits packets into smaller pieces, and then fragmented packets are sending to avoid MTU. Fragmented packets are reassembled at the received host. However, the packet fragmentation also appears technical problems, which are packet filtering at the Firewall or NAT router, fragmented packets can be lost in the transmission, and the implementation in UDP of packet fragmentation is difficult. St\aa x is the Kademlia DHT using UDP based system. St\aa x's Kademlia DHT offers MTU size for UDP up to 1000 bytes. Thus, St\aa x can appear such problems.
 \begin{itemize}
 	\item As lost datagram has happened, the protocol requires a checksum process.
@@ -94,17 +49,17 @@ The completely developed prototype will be evaluated by demanded procedures. The
 	%\begin{flushleft}
 	\begin{tabular}{ p{2cm} p{13cm} }
 	%\raggedleft
-		1/2 month & Research of decentralized network systems and related work \\
-		1/2 month & Design the prototype using St\aa x \\
-		1/2 month & Implement the St\aa x and other systems \\
-		2 month & Develop and implement the prototype, and if there is enough time, develop the extending prototype using other protocols \\
-		1/2 month & Simulation and evaluation \\
-		2 month & Write thesis \\
+		$\bullet$ 1/2 month & Research of decentralized network systems and related work \\
+		$\bullet$ 1/2 month & Design the prototype using St\aa x \\
+		$\bullet$ 1/2 month & Implement the St\aa x and other systems \\
+		$\bullet$ 2 month & Develop and implement the prototype, and if there is enough time, develop the extending prototype using other protocols \\
+		$\bullet$ 1/2 month & Simulation and evaluation \\
+		$\bullet$ 2 month & Write thesis \\
 	\end{tabular}
 	%\end{flushleft}
 \end{table}
 
-
+\newpage
 
 \bibliographystyle{IEEEtran}
 \bibliography{bibliography.bib}
