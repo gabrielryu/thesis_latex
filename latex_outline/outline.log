@@ -1,7 +1,6 @@
-This is pdfTeX, Version 3.14159265-2.6-1.40.20 (TeX Live 2019) (preloaded format=pdflatex 2020.4.2)  4 APR 2020 01:20
+This is pdfTeX, Version 3.14159265-2.6-1.40.20 (TeX Live 2019) (preloaded format=pdflatex 2020.4.2)  18 MAY 2020 04:49
 entering extended mode
  restricted \write18 enabled.
- file:line:error style messages enabled.
  %&-line parsing enabled.
 **outline.tex
 (./outline.tex
@@ -343,34 +342,33 @@ Underfull \hbox (badness 10000) in paragraph at lines 23--24
  []
 
 [1] [2]
-Overfull \hbox (17.17133pt too wide) in paragraph at lines 50--60
+Overfull \hbox (17.17133pt too wide) in paragraph at lines 53--64
  [][] 
  []
 
 [3] (./outline.bbl) [4] (./outline.aux) ) 
 Here is how much of TeX's memory you used:
- 4999 strings out of 480994
- 69274 string characters out of 5912143
- 344957 words of memory out of 5000000
- 20434 multiletter control sequences out of 15000+600000
- 540755 words of font info for 37 fonts, out of 8000000 for 9000
+ 4997 strings out of 480994
+ 69261 string characters out of 5912143
+ 345962 words of memory out of 5000000
+ 20433 multiletter control sequences out of 15000+600000
+ 540420 words of font info for 36 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 32i,11n,37p,2686b,249s stack positions out of 5000i,500n,10000p,200000b,80000s
+ 32i,11n,37p,1088b,249s stack positions out of 5000i,500n,10000p,200000b,80000s
 {/usr/local/texlive/2019/texmf-dist/fo
-nts/enc/dvips/cm-super/cm-super-t1.enc}{/usr/local/texlive/2019/texmf-dist/font
-s/enc/dvips/cm-super/cm-super-ts1.enc}</usr/local/texlive/2019/texmf-dist/fonts
-/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2019/texmf-dist/fonts/
-type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2019/texmf-dist/fonts/ty
-pe1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2019/texmf-dist/fonts/type
-1/public/cm-super/sfbx2074.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/
-public/cm-super/sfbx2488.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/pu
-blic/cm-super/sfrm1000.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/publ
-ic/cm-super/sfrm1200.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/public
-/cm-super/sfti1000.pfb>
-Output written on outline.pdf (5 pages, 295583 bytes).
+nts/enc/dvips/cm-super/cm-super-t1.enc}</usr/local/texlive/2019/texmf-dist/font
+s/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2019/texmf-dist/fonts
+/type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2019/texmf-dist/fonts/t
+ype1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2019/texmf-dist/fonts/typ
+e1/public/cm-super/sfbx2074.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1
+/public/cm-super/sfbx2488.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/p
+ublic/cm-super/sfrm1000.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/pub
+lic/cm-super/sfrm1200.pfb></usr/local/texlive/2019/texmf-dist/fonts/type1/publi
+c/cm-super/sfti1000.pfb>
+Output written on outline.pdf (5 pages, 294917 bytes).
 PDF statistics:
- 65 PDF objects out of 1000 (max. 8388607)
- 45 compressed objects within 1 object stream
+ 62 PDF objects out of 1000 (max. 8388607)
+ 42 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  6 words of extra memory for PDF output out of 10000 (max. 10000000)
 
