@@ -70,9 +70,6 @@ R.~Bonica, F.~Baker, G.~Huston, B.~Hinden, O.~Tr{{\o}}an, and F.~Gont, ``{IP
   Available: \url{https://rfc-editor.org/rfc/rfc815.txt}
 \BIBentrySTDinterwordspacing
 
-\bibitem{alliance2009ethernet}
-E.~Alliance and B.~Kohl, ``Ethernet jumbo frames,'' 2009.
-
 \bibitem{tobin2016inevitable}
 A.~Tobin and D.~Reed, ``The inevitable rise of self-sovereign identity,''
   \emph{The Sovrin Foundation}, vol.~29, no. 2016, 2016.
@@ -81,12 +78,5 @@ A.~Tobin and D.~Reed, ``The inevitable rise of self-sovereign identity,''
 M.~Sabadello, K.~Den~Hartog, C.~Lundkvist, C.~Franz, A.~Elias, A.~Hughes,
   J.~Jordan, and D.~Zagidulin, ``Introduction to did auth,'' \emph{Rebooting
   the Web of Trust VI}, 2018.
-
-\bibitem{rfc3828}
-\BIBentryALTinterwordspacing
-L.-E. Jonsson, L.~{{\AA}}ke Larzon, G.~Fairhurst, S.~Pink, and M.~Degermark,
-  ``{The Lightweight User Datagram Protocol (UDP-Lite)},'' RFC 3828, Jul. 2004.
-  [Online]. Available: \url{https://rfc-editor.org/rfc/rfc3828.txt}
-\BIBentrySTDinterwordspacing
 
 \end{thebibliography}
