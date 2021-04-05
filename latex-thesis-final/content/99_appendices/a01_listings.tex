@@ -1,0 +1,1783 @@
+\chapter{Appendix 1}
+\label{appendix:listing1}
+
+\lstset{language=C}
+\begin{lstlisting} [caption=transmission.c]
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <err.h>
+
+#include "internal.h"
+#include "staxnet.h"
+#include "sodium.h"
+
+#define CERT_B64_SIZE sodium_base64_ENCODED_LEN(STAXNET_CERT_PACKED_SIZE, \
+sodium_base64_VARIANT_ORIGINAL_NO_PADDING)
+
+#define CA_PK_B64_SIZE sodium_base64_ENCODED_LEN(STAXNET_CA_PUBLICKEY_SIZE, \
+sodium_base64_VARIANT_ORIGINAL_NO_PADDING)
+
+#define NODE_SK_B64_SIZE sodium_base64_ENCODED_LEN(STAXNET_NODE_SECRETKEY_SIZE, \
+sodium_base64_VARIANT_ORIGINAL_NO_PADDING)
+
+#define ID_B64_LENGTH sodium_base64_ENCODED_LEN(STAXNET_ID_LENGTH,\
+sodium_base64_VARIANT_ORIGINAL_NO_PADDING)
+
+static int cert_packed_dec_b64(char b64[CERT_B64_SIZE], uint8_t buf[STAXNET_CERT_PACKED_SIZE])
+{
+	if (b64 == NULL || buf == NULL)
+	return -1;
+	
+	// Minus NULL-byte.
+	return sodium_base642bin(buf, STAXNET_CERT_PACKED_SIZE, b64, CERT_B64_SIZE-1,
+	NULL, NULL, NULL, sodium_base64_VARIANT_ORIGINAL_NO_PADDING);
+}
+
+static int ca_pk_dec_b64(char ca_pk_b64[CA_PK_B64_SIZE],
+uint8_t ca_pk[STAXNET_CA_PUBLICKEY_SIZE])
+{
+	
+	// Minus NULL-byte.
+	return sodium_base642bin(ca_pk, STAXNET_CA_PUBLICKEY_SIZE, ca_pk_b64,
+	CA_PK_B64_SIZE -1, NULL, NULL, NULL,
+	sodium_base64_VARIANT_ORIGINAL_NO_PADDING);
+}
+
+int listen_udp(char* addr, int port)
+{
+	struct sockaddr_in sa;
+	int s;
+	
+	bzero(&sa, sizeof(sa));
+	sa.sin_family = AF_INET;
+	sa.sin_port = htons(port);
+	
+	if (inet_pton(AF_INET, addr, &(sa.sin_addr)) == -1)
+	err(1, "inet_pton");
+	
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+	err(1, "socket");
+	
+	if (bind(s, (struct sockaddr *)&sa, sizeof(sa)) == -1)
+	err(1, "bind");
+	
+	return s;
+	
+}
+
+struct config_kv* parse_config_t(const char *path)
+{
+	FILE *f;
+	int pos, kv_pos;
+	enum parser_state state;
+	struct config_kv *kv = NULL, *kv_tmp;
+	char buf[1024];
+	char c;
+	
+	if ((f = fopen(path, "r")) == NULL)
+	err(1, "fopen: %s", path);
+	
+	while (fgets(buf, 1024, f) != NULL) {
+		if (buf[0] == '#')
+		continue;
+		
+		// Alloc new option.
+		kv_tmp = kv;
+		kv = malloc(sizeof(struct config_kv));
+		kv->next = kv_tmp;
+		
+		// Reset state for new line.
+		state = KEY;
+		kv_pos = pos = 0;
+		
+		for (c = buf[pos]; c != '\0' && c != '\n'; c = buf[++pos]) {
+			if (c == ' ')
+			continue;
+			
+			if (state == KEY && c == '=') {
+				kv->key[kv_pos+1] = '\0';
+				state = VAL;
+				kv_pos = 0;
+				continue;
+			}
+			
+			if (state == KEY) {
+				kv->key[kv_pos] = c;
+			} else {
+				kv->val[kv_pos] = c;
+			}
+			
+			++kv_pos;
+		}
+		
+		if (state == KEY) {
+			fprintf(stderr, "config file does not have '=' in a line");
+			exit(EXIT_FAILURE);
+		}
+		
+		kv->val[kv_pos+1] = '\0';
+	}
+	
+	fclose(f);
+	
+	return kv;
+}
+
+void splitAddrWithPort(char *str, char **addr, int *port)
+{
+	int val;
+	char *sub;
+	
+	if ((sub = strchr(str, ':')) == NULL)
+	return;
+	
+	// In case ':' is the first char, we do not change addr.
+	// This enables us to set addr to a default value before calling this function
+	// and only change addr with there is actualy a new addr.
+	if (sub != str) {
+		*addr = str;
+		// Split addr and port with '\0'.
+		*sub = '\0';
+	}
+	
+	errno = 0;
+	val = atoi(sub+1); // Skip ':'.
+	checkAtoi(val);
+	
+	*port = val;
+}
+
+void checkAtoi(int val)
+{
+	if ((errno == ERANGE && (val == INT_MAX || val == INT_MIN))
+	|| (errno != 0 && val == 0)) {
+		perror("atoi");
+		exit(EXIT_FAILURE);
+	}
+}
+
+struct staxnet_addr *parse_mapping_addr(char *str)
+{
+	struct staxnet_addr *addr;
+	char *saveptr, *tok;
+	int port;
+	
+	char *cpy = strdup(str);
+	
+	if ((tok = strtok_r(cpy, ":", &saveptr)) == NULL)
+	goto f2;
+	
+	addr = malloc(sizeof(struct staxnet_addr));
+	
+	if (inet_pton(AF_INET, tok, &(addr->sa.sin_addr)) == -1)
+	goto f1;
+	
+	if ((tok = strtok_r(NULL, ":", &saveptr)) == NULL)
+	goto f1;
+	
+	errno = 0;
+	port = atoi(tok);
+	if ((errno == ERANGE && (port == INT_MAX || port == INT_MIN)) || (errno != 0 && port == 0))
+	goto f1;
+	
+	addr->sa.sin_port = htons(port);
+	addr->sa.sin_family = AF_INET;
+	free(cpy);
+	
+	return addr;
+	
+	f1:
+	free(addr);
+	f2:
+	free(cpy);
+	return NULL;
+}
+
+int send_request_transmission(struct staxnet *net, struct req *req, struct info *info)
+{
+	if (crypto_kx_client_session_keys(req->rx, req->tx, net->cert.nodeID,
+	net->sk, info->cert.nodeID) != 0) {
+		WARN("failed to create session keys");
+		return STAXNET_ERR_SESSION_KEYS;
+	}
+	// Set recipient.
+	req->retry = 0;
+	msg_wire_init(&req->mw, &req->msg, req->tx);
+	// Send out!
+	send_wire(net, &req->mw, &info->sa, info->salen);
+	
+	return 0;
+}
+
+int reply(struct staxnet *net, struct info *info)
+{
+	struct req *req = malloc(sizeof(struct req));
+	bzero(req, sizeof(struct req));
+	req->msg.header.type = net->msg.header.type;
+	randombytes_buf(req->msg.header.nonce, MSG_NONCE_SIZE);
+	staxnet_cert_pack(&net->cert, req->msg.header.cert);
+	{
+		memcpy(req->msg.payload, net->msg.payload, net->msg.len);
+		req->msg.len = net->msg.len;
+	}
+	int err = send_request_transmission(net, req, info);
+	if ( err < 0)
+	{
+		WARN("failed to send message : %d",err);
+		return err;
+	}
+	free(req);
+	return 0;
+}
+
+int ping_to_server(struct staxnet *net, struct staxnet_addr *mapping_addr, struct info *info)
+{
+	int err;
+	uint8_t      rx[crypto_kx_SESSIONKEYBYTES];
+	
+	net->msg.header.type = PING;
+	randombytes_buf(net->msg.header.nonce, MSG_NONCE_SIZE);
+	staxnet_cert_pack(&net->cert, net->msg.header.cert);
+	net->msg.len = 0;
+	if(msg_wire_init(&net->mw, &net->msg, net->tx)!=0)
+	{
+		WARN("failed to init message");
+		return -1;
+	}
+	
+	err = sendto(net->socket, net->mw.data, net->mw.len, 0, (struct sockaddr*)(&mapping_addr->sa), sizeof(struct sockaddr_in));
+	if ( err < 0)
+	{
+		WARN("failed to send message : %d",err);
+		return err;
+	}
+	ssize_t len;
+	
+	struct msg_wire mw;
+	
+	len = recvfrom(net->socket, mw.data, MSG_WIRE_SIZE, 0, &net->from, &net->fromlen);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	mw.len = len;
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	if (net->msg.header.type == PING_ACK)
+	DEBUG("PING_ACK");
+	else
+	{
+		WARN("received invalid header from message; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	staxnet_cert_unpack(&info->cert, net->msg.header.cert);
+	if (staxnet_cert_verify(&info->cert, net->ca_pk) != 0)
+	{
+		WARN("received packet with a invalid signature; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	info->relay_type = NO;
+	info->salen = net->fromlen;
+	memcpy(&info->sa, &net->from, net->fromlen);
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	memset(&net->msg.payload, 0x00, sizeof(net->msg.payload));
+	if (msg_wire_get_payload(&mw, &net->msg, rx) != 0)
+	{
+		WARN("failed to decrypt received message");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	return 0;
+}
+
+int ping_to_server_tcp(struct staxnet *net, struct staxnet_addr *mapping_addr, struct info *info)
+{
+	uint8_t      rx[crypto_kx_SESSIONKEYBYTES];
+	net->msg.header.type = PING;
+	randombytes_buf(net->msg.header.nonce, MSG_NONCE_SIZE);
+	staxnet_cert_pack(&net->cert, net->msg.header.cert);
+	net->msg.len = 0;
+	if(msg_wire_init(&net->mw, &net->msg, net->tx)!=0)
+	{
+		WARN("failed to init message");
+		return -1;
+	}
+	DEBUG("checked");
+	
+	if (write(net->socket, net->mw.data, net->mw.len) < 0)
+	{
+		WARN("failed to send message");
+		return -1;
+	}
+	ssize_t len;
+	
+	struct msg_wire mw;
+	
+	len = recvfrom(net->socket, mw.data, MSG_WIRE_SIZE, 0, &net->from, &net->fromlen);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	mw.len = len;
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	if (net->msg.header.type == PING_ACK)
+	DEBUG("PING_ACK");
+	else
+	{
+		WARN("received invalid header from message; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	staxnet_cert_unpack(&info->cert, net->msg.header.cert);
+	if (staxnet_cert_verify(&info->cert, net->ca_pk) != 0)
+	{
+		WARN("received packet with a invalid signature; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	info->relay_type = NO;
+	info->salen = net->fromlen;
+	memcpy(&info->sa, &net->from, net->fromlen);
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	memset(&net->msg.payload, 0x00, sizeof(net->msg.payload));
+	if (msg_wire_get_payload(&mw, &net->msg, rx) != 0)
+	{
+		WARN("failed to decrypt received message");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	return 0;
+}
+
+int handle_mapping_addr(struct staxnet *net, struct info *info, struct msg_wire mw, struct staxnet_addr *s_addr)
+{
+	DEBUG("call");
+	uint8_t rx[crypto_kx_SESSIONKEYBYTES];
+	
+	if (net->from.sa_family != AF_INET)
+	{
+		WARN("Received a packet from a different address family than IPv4, dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (net->msg.header.type == GET_ADDR_ACK)
+	DEBUG("GET_ADDR_ACK");
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	memset(&net->msg.payload, 0x00, sizeof(net->msg.payload));
+	if (msg_wire_get_payload(&mw, &net->msg, rx) != 0)
+	{
+		WARN("failed to decrypt received message");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	char buf[MSG_PAYLOAD_SIZE];
+	memset(buf, 0x00, sizeof(buf));
+	memcpy(buf, net->msg.payload + STAXNET_CERT_NODEID_SIZE, net->msg.len - STAXNET_CERT_NODEID_SIZE);
+	
+	struct staxnet_addr *addr = parse_mapping_addr(buf);
+	int port = ntohs(addr->sa.sin_port);
+	//Fixed UDP_server's port number from config file - 1000
+	port -= 1000;
+	addr->sa.sin_port = htons(port);
+	
+	memcpy(addr->cert.nodeID, net->msg.payload, STAXNET_CERT_NODEID_SIZE);
+	memcpy(s_addr, addr, sizeof(struct staxnet_addr));
+	
+	return 0;
+}
+
+int recv_msg(struct staxnet *net, struct info *info)
+{
+	uint8_t      rx[crypto_kx_SESSIONKEYBYTES];
+	ssize_t len;
+	struct msg_wire mw;
+	bzero(info, sizeof(struct info));
+	bzero(&mw, sizeof(struct msg_wire));
+	len = recvfrom(net->socket, mw.data, MSG_WIRE_SIZE, 0, &net->from, &net->fromlen);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	mw.len = len;
+	
+	if (net->from.sa_family != AF_INET)
+	{
+		WARN("Received a packet from a different address family than IPv4, dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	staxnet_cert_unpack(&info->cert, net->msg.header.cert);
+	
+	if (staxnet_cert_verify(&info->cert, net->ca_pk) != 0)
+	{
+		WARN("received packet with a invalid signature; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	info->relay_type = NO;
+	info->salen = net->fromlen;
+	memcpy(&info->sa, &net->from, net->fromlen);
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	return 0;
+}
+
+int recv_data(struct staxnet *net, struct info *info)
+{
+	uint8_t	rx[crypto_kx_SESSIONKEYBYTES];
+	ssize_t len;
+	struct msg_wire mw;
+	
+	bzero(&mw, sizeof(struct msg_wire));
+	len = recvfrom(net->socket, mw.data, MSG_WIRE_SIZE, 0, &net->from, &net->fromlen);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	mw.len = len;
+	
+	if (net->from.sa_family != AF_INET)
+	{
+		WARN("Received a packet from a different address family than IPv4, dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	info->relay_type = NO;
+	info->salen = net->fromlen;
+	memcpy(&info->sa, &net->from, net->fromlen);
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	memset(&net->msg.payload, 0x00, sizeof(net->msg.payload));
+	if (msg_wire_get_payload(&mw, &net->msg, rx) != 0)
+	{
+		WARN("failed to decrypt received message");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	return 0;
+}
+
+struct staxnet *transmission_new(struct staxnet_opts *opts)
+{
+	//char *str_perm;
+	struct timeval cert_tv;
+	struct staxnet *net = malloc(sizeof(struct staxnet));
+	
+	// Zero out struct.
+	bzero(net, sizeof(struct staxnet));
+	
+	// We reserve 0 to indicate that the req is new.
+	net->next_msgId = 1; // necessary?
+	net->socket = opts->socket;
+	net->fromlen = sizeof(net->from);
+	// Init time.
+	if (gettimeofday(&net->tv, NULL) == -1)
+	{
+		WARN("gettimeofday failed: %s", strerror(errno));
+		return NULL;
+	}
+	
+	// Verify signature of certificate.
+	if (staxnet_cert_verify(&opts->cert, opts->ca_pk) != 0)
+	{
+		WARN("failed to verify node cetificate signature");
+		return NULL;
+	}
+	
+	// Check if certificate is still valid.
+	cert_tv.tv_sec = opts->cert.timestamp;
+	cert_tv.tv_usec = 0;
+	if (!timercmp(&net->tv, &cert_tv, <))
+	{
+		WARN("node certificate expired");
+		return NULL;
+	}
+	
+	// Save certificate.
+	memcpy(&net->cert, &opts->cert, sizeof(struct staxnet_cert));
+	memcpy(net->sk, opts->node_sk, STAXNET_NODE_SECRETKEY_SIZE);
+	memcpy(net->ca_pk, opts->ca_pk, STAXNET_CA_PUBLICKEY_SIZE);
+	
+	return net;
+}
+
+void extract_config(struct config_kv *kv, char *udpAddr, int *udpPort, struct staxnet_opts *net_opts, struct staxnet_addr* Addr)
+{
+	uint8_t cert_packed[STAXNET_CERT_PACKED_SIZE];
+	struct staxnet_addr *Addr_temp = NULL;
+	int port=0;
+	while (kv != NULL)
+	{
+		if (strncmp("listen", kv->key, 1024) == 0)
+		{
+			splitAddrWithPort(kv->val, &udpAddr, &port);
+			goto config_next;
+		}
+		
+		if (strncmp("cert", kv->key, 1024) == 0)
+		{
+			if (cert_packed_dec_b64(kv->val, cert_packed) != 0)
+			{
+				fprintf(stderr, "config: failed to decode certificate\n");
+				exit(EXIT_FAILURE);
+			}
+			staxnet_cert_unpack(&net_opts->cert, cert_packed);
+			
+			goto config_next;
+		}
+		
+		if (strncmp("sk", kv->key, 1024) == 0)
+		{
+			if (sodium_base642bin(net_opts->node_sk, STAXNET_NODE_SECRETKEY_SIZE,
+			kv->val, NODE_SK_B64_SIZE - 1, NULL, NULL, NULL,
+			sodium_base64_VARIANT_ORIGINAL_NO_PADDING) != 0)
+			{
+				fprintf(stderr, "config: failed to decode node secret key\n");
+				exit(EXIT_FAILURE);
+			}
+			goto config_next;
+		}
+		
+		if (strncmp("ca_pk", kv->key, 1024) == 0)
+		{
+			if (ca_pk_dec_b64(kv->val, net_opts->ca_pk) != 0)
+			{
+				fprintf(stderr, "config: failed to decode CA's public key\n");
+				exit(EXIT_FAILURE);
+			}
+			goto config_next;
+		}
+		if (strncmp("mapping", kv->key, 1024) == 0)
+		{
+			if ((Addr_temp = parse_mapping_addr(kv->val)) == NULL)
+			{
+				fprintf(stderr, "config: invalid staxnet bootnode address\n");
+				exit(EXIT_FAILURE);
+			}
+			goto config_next;
+		}
+		config_next:
+		kv = kv->next;
+	}
+	memcpy(udpPort, &port, sizeof(int));
+	char buff[32] = {0,};
+	inet_ntop(AF_INET, &Addr_temp->sa.sin_addr, buff, sizeof(buff));
+	memcpy(Addr, Addr_temp, sizeof(struct staxnet_addr));
+}
+
+void extract_ssl_config(struct config_kv *kv, char **ca, char **key)
+{
+	while (kv != NULL)
+	{
+		if (strncmp("SSL_ca", kv->key, 1024) == 0)
+		{
+			char *ca_temp = strdup(kv->val);
+			*ca = ca_temp;
+			if(access(ca_temp, 0)!=0)
+			{
+				perror("SSL CA error");
+				exit(EXIT_FAILURE);
+			}
+			goto config_next;
+		}
+		
+		if (strncmp("SSL_pk", kv->key, 1024) == 0)
+		{
+			char *key_temp = strdup(kv->val);
+			*key = key_temp;
+			if(access(key_temp, 0)!=0)
+			{
+				perror("SSL key error");
+				exit(EXIT_FAILURE);
+			}
+			
+			goto config_next;
+		}
+		
+		config_next:
+		kv = kv->next;
+	}
+}
+
+struct staxnet_addr* get_dest_addr(char *nodeID, char *configPath)
+{
+	DEBUG("call");
+	struct staxnet_opts net_opts;
+	struct staxnet *net;
+	struct info  *info = malloc(sizeof(struct info));
+	int sa_in;
+	struct staxnet_addr *Addr = malloc(sizeof(struct staxnet_addr));
+	bzero(Addr, sizeof(struct staxnet_addr));
+	struct msg_wire mw;
+	
+	ssize_t len = 0;
+	// UDP listen interface and port.
+	int  udpPort = 6565;
+	char *udpAddr= "0.0.0.0";
+	
+	struct config_kv *kv = parse_config_t(configPath);
+	extract_config(kv, udpAddr, &udpPort, &net_opts, Addr);
+	
+	sa_in = listen_udp(udpAddr, udpPort-1000);
+	net_opts.socket = sa_in;
+	
+	if (sodium_init() == -1)
+	{
+		fprintf(stderr, "failed to initialize sodium library\n");
+		exit(EXIT_FAILURE);
+	}
+	if ((net = transmission_new(&net_opts)) == NULL) {
+		fprintf(stderr, "failed to create staxnet\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	bzero(info, sizeof(struct info));
+	//Ping to the mapping server
+	if(ping_to_server(net, Addr, info) != 0)
+	{
+		perror("failed to ping to the mapping server");
+		exit(EXIT_FAILURE);
+	}
+	
+	bzero(net->msg.payload, MSG_PAYLOAD_SIZE);
+	memcpy(net->msg.payload, nodeID, ID_B64_LENGTH);
+	net->msg.len = ID_B64_LENGTH;
+	
+	//Get addr from the mapping server
+	net->msg.header.type = GET_ADDR;
+	if(reply(net, info) != 0)
+	{
+		perror("failed to request to the mapping server");
+		exit(EXIT_FAILURE);
+	}
+	
+	bzero(&mw, sizeof(struct msg_wire));
+	
+	len = recvfrom(net->socket, mw.data, MSG_WIRE_SIZE, 0, &net->from, &net->fromlen);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	mw.len = len;
+	bzero(Addr, (sizeof(struct staxnet_addr)));
+	if(handle_mapping_addr(net, info, mw, Addr) != 0)
+	{
+		perror("failed to get addr");
+		exit(EXIT_FAILURE);
+	}
+	
+	close(sa_in);
+	close(net->socket);
+	free(net);
+	free(info);
+	free(kv);
+	
+	return Addr;
+}
+
+/* TCP Transmission Control Func */
+
+int send_request_tcp(struct staxnet *net, struct req *req, struct info *info)
+{
+	if (crypto_kx_client_session_keys(req->rx, req->tx, net->cert.nodeID,
+	net->sk, info->cert.nodeID) != 0)
+	{
+		WARN("failed to create session keys");
+		return STAXNET_ERR_SESSION_KEYS;
+	}
+	// Set recipient.
+	req->retry = 0;
+	
+	msg_wire_init(&req->mw, &req->msg, req->tx);
+	// Send out!
+	if (write(net->socket, req->mw.data, req->mw.len) < 0)
+	{
+		WARN("failed to send message");
+		return -1;
+	}
+	
+	return 0;
+}
+
+int reply_tcp(struct staxnet *net, struct info *info)
+{
+	struct req *req = malloc(sizeof(struct req));
+	bzero(req, sizeof(struct req));
+	req->msg.header.type = net->msg.header.type;
+	randombytes_buf(req->msg.header.nonce, MSG_NONCE_SIZE);
+	staxnet_cert_pack(&net->cert, req->msg.header.cert);
+	memcpy(req->msg.payload, net->msg.payload, net->msg.len);
+	req->msg.len = net->msg.len;
+	int err = send_request_tcp(net, req, info);
+	if ( err < 0)
+	{
+		WARN("failed to send message : %d",err);
+		return err;
+	}
+	free(req);
+	return 0;
+}
+
+int recv_msg_tcp(struct staxnet *net, struct info *info)
+{
+	uint8_t      rx[crypto_kx_SESSIONKEYBYTES];
+	ssize_t len;
+	struct msg_wire mw;
+	bzero(info, sizeof(struct info));
+	bzero(&mw, sizeof(struct msg_wire));
+	
+	len = read(net->socket, mw.data, MSG_WIRE_SIZE);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	mw.len = len;
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	staxnet_cert_unpack(&info->cert, net->msg.header.cert);
+	
+	if (staxnet_cert_verify(&info->cert, net->ca_pk) != 0)
+	{
+		WARN("received packet with a invalid signature; drop it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	return 0;
+}
+
+int recv_data_tcp(struct staxnet *net, struct info *info)
+{
+	uint8_t	rx[crypto_kx_SESSIONKEYBYTES];
+	ssize_t len;
+	struct msg_wire mw;
+	bzero(&mw, sizeof(struct msg_wire));
+	
+	len = read(net->socket, mw.data, MSG_WIRE_SIZE);
+	if (len < 0)
+	{
+		WARN("recvfrom failed: %s", strerror(errno));
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	mw.len = len;
+	
+	if (net->from.sa_family != AF_INET)
+	{
+		WARN("Received a packet from a different address family than IPv4, dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (msg_wire_get_header(&mw, &net->msg.header) != 0)
+	{
+		WARN("Failed to extract header from message; dropping it");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	
+	if (net->msg.header.type == GET_DATA)
+	DEBUG("Get Header for Data Transmission\n");
+	
+	if (crypto_kx_server_session_keys(rx, net->tx, net->cert.nodeID, net->sk,
+	info->cert.nodeID) != 0)
+	{
+		WARN("failed to create server session keys");
+		close(net->socket);
+		exit(EXIT_FAILURE);
+	}
+	if (mw.len != 0)
+	{
+		memset(&net->msg.payload, 0x00, sizeof(net->msg.payload));
+		if (msg_wire_get_payload(&mw, &net->msg, rx) != 0)
+		{
+			WARN("failed to decrypt received message");
+			close(net->socket);
+			exit(EXIT_FAILURE);
+		}
+	}
+	else
+	net->msg.len = mw.len;
+	
+	return 0;
+}
+
+\end{lstlisting}
+
+
+\begin{lstlisting} [caption=quic\_transmission.c]
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <err.h>
+
+#include "internal.h"
+#include "staxnet.h"
+#include "sodium.h"
+
+#define basepath "./temp/"
+
+int quic_client_config(char *filename, char *nodeID, char *configPath)
+{
+	DEBUG("call");
+	struct staxnet_opts net_opts;
+	struct staxnet *net;
+	
+	// Mapping server
+	struct staxnet_addr *Addr = malloc(sizeof(struct staxnet_addr));
+	
+	char *filepath = malloc(1024);
+	strcpy(filepath, basepath);
+	strcat(filepath,filename);
+	
+	// UDP listen interface and port.
+	int  udpPort = 0;
+	char *udpAddr= "0.0.0.0";
+	
+	//server addr
+	char server_addr[NI_MAXHOST];
+	char server_port[NI_MAXSERV];
+	
+	struct config_kv *kv = parse_config_t(configPath);
+	extract_config(kv, udpAddr, &udpPort, &net_opts, Addr);
+	
+	if (sodium_init() == -1)
+	{
+		fprintf(stderr, "failed to initialize sodium library\n");
+		exit(EXIT_FAILURE);
+	}
+	if ((net = transmission_new(&net_opts)) == NULL) {
+		fprintf(stderr, "failed to create staxnet\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	bzero(Addr, sizeof(struct staxnet_addr));
+	Addr = get_dest_addr(nodeID, configPath);
+	struct sockaddr server_info;
+	
+	bzero(&server_info, sizeof(struct sockaddr));
+	memcpy(&server_info, (struct sockaddr *)&Addr->sa, sizeof(struct sockaddr));
+	if (getnameinfo(&server_info, sizeof(Addr->sa), server_addr, sizeof(server_addr),
+	server_port, sizeof(server_port), NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+	{
+		perror("failed to get server address");
+		exit(EXIT_FAILURE);
+	}
+	char addr_source[1024]={0,};
+	strcat(addr_source, strcat(strcat(server_addr, ":"),server_port));
+	
+	if (quic_client(filepath, addr_source) != 0)
+	{
+		fprintf(stderr, "failed to initialize quic transmission\n");
+		exit(EXIT_FAILURE);
+	}
+	return 0;
+}
+
+int quic_server_config(char *filename, char *configPath)
+{
+	DEBUG("call");
+	DEBUG("config : %s",configPath);
+	struct staxnet_opts net_opts;
+	struct staxnet_addr *Addr = malloc(sizeof(struct staxnet_addr));
+	// SSL Certification
+	char *ssl_ca = malloc(1024);
+	char *ssl_key = malloc(1024);
+	
+	// UDP listen interface and port.
+	int  quicPort = 6565;
+	char *quicAddr= "0.0.0.0";
+	struct config_kv *kv = parse_config_t(configPath);
+	
+	extract_config(kv, quicAddr, &quicPort, &net_opts, Addr);
+	extract_ssl_config(kv, &ssl_ca, &ssl_key);
+	
+	char qport[NI_MAXSERV];
+	sprintf(qport, "%d", quicPort-1000);
+	char* config_addr = malloc(NI_MAXHOST+NI_MAXSERV+1);
+	strcat(strcat(config_addr, quicAddr), ":");
+	strcat(config_addr, qport);
+	
+	char *config_cert = malloc(1024);
+	strcat(strcat(config_cert, ssl_ca), ",");
+	strcat(config_cert, ssl_key);
+	
+	if (quic_server(filename, config_addr, config_cert) != 0)
+	{
+		fprintf(stderr, "failed to initialize quic transmission\n");
+		exit(EXIT_FAILURE);
+	}
+	free(ssl_ca);
+	free(ssl_key);
+	free(kv);
+	free(quicAddr);
+	free(config_cert);
+	free(config_addr);
+	free(Addr);
+	
+	return 0;
+}
+\end{lstlisting}
+\begin{lstlisting} [caption=quic\_server.c]
+/* Copyright (c) 2017 - 2020 LiteSpeed Technologies Inc.  See LICENSE. */
+/*
+* md5_server.c -- Read one or more streams from the client and return
+*                 MD5 sum of the payload.
+*/
+
+#include <assert.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/queue.h>
+#include <sys/uio.h>
+#include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
+#include "openssl/md5.h"
+
+#include <event2/event.h>
+
+#include "lsquic.h"
+#include "test_common.h"
+#include "lsquic_hash.h"
+#include "test_cert.h"
+#include "prog.h"
+
+#include "lsquic_logger.h"
+#include "staxnet.h"
+#include "internal.h"
+
+
+
+int server_cnt = 0;
+
+
+/* Set to non-zero value to test out what happens when reset is sent */
+#define RESET_AFTER_N_WRITES 0
+
+static int md5_check_buf = 0;
+static int g_really_calculate_md5 = 1;
+static int g_write_file = 1;
+
+#define LOCAL_BUF_SIZE 0x100
+
+struct lsquic_conn_ctx;
+
+struct server_ctx {
+	TAILQ_HEAD(, lsquic_conn_ctx)   conn_ctxs;
+	LIST_HEAD(, file) files;
+	unsigned max_reqs;
+	int n_conn;
+	time_t expiry;
+	struct sport_head sports;
+	struct prog *prog;
+	unsigned                     n_files;
+};
+
+struct file {
+	LIST_ENTRY(file)        next_file;
+	const char             *filename;
+	struct lsquic_reader    reader;
+	int                     fd;
+	unsigned                priority;
+	enum {
+		FILE_RESET  = (1 << 0),
+	}                       file_flags;
+	size_t                  md5_off;
+	MD5_CTX              md5ctx;
+	char                    md5str[MD5_DIGEST_LENGTH * 2];
+};
+
+struct lsquic_conn_ctx {
+	TAILQ_ENTRY(lsquic_conn_ctx)    next_connh;
+	lsquic_conn_t       *conn;
+	unsigned             n_reqs, n_closed;
+	struct server_ctx   *server_ctx;
+};
+
+static lsquic_conn_ctx_t *
+server_on_new_conn (void *stream_if_ctx, lsquic_conn_t *conn)
+{
+	struct server_ctx *server_ctx = stream_if_ctx;
+	lsquic_conn_ctx_t *conn_h = calloc(1, sizeof(*conn_h));
+	conn_h->conn = conn;
+	conn_h->server_ctx = server_ctx;
+	TAILQ_INSERT_TAIL(&server_ctx->conn_ctxs, conn_h, next_connh);
+	LSQ_NOTICE("New connection!");
+	print_conn_info(conn);
+	return conn_h;
+}
+
+
+static void
+server_on_conn_closed (lsquic_conn_t *conn)
+{
+	lsquic_conn_ctx_t *conn_h = lsquic_conn_get_ctx(conn);
+	int stopped;
+	
+	if (conn_h->server_ctx->expiry && conn_h->server_ctx->expiry < time(NULL))
+	{
+		LSQ_NOTICE("reached engine expiration time, shut down");
+		prog_stop(conn_h->server_ctx->prog);
+		stopped = 1;
+	}
+	else
+	stopped = 0;
+	
+	if (conn_h->server_ctx->n_conn)
+	{
+		--conn_h->server_ctx->n_conn;
+		LSQ_NOTICE("Connection closed, remaining: %d", conn_h->server_ctx->n_conn);
+		if (0 == conn_h->server_ctx->n_conn && !stopped)
+		prog_stop(conn_h->server_ctx->prog);
+	}
+	else
+	LSQ_NOTICE("Connection closed");
+	TAILQ_REMOVE(&conn_h->server_ctx->conn_ctxs, conn_h, next_connh);
+	free(conn_h);
+}
+
+
+struct lsquic_stream_ctx {
+	lsquic_stream_t     *stream;
+	struct server_ctx   *server_ctx;
+	struct file         *file;
+	struct event        *read_stdin_ev;
+	MD5_CTX              md5ctx;
+	unsigned char        md5sum[MD5_DIGEST_LENGTH];
+	char                 md5str[MD5_DIGEST_LENGTH * 2 + 1];
+	const char           *filename;
+	struct {
+		int         initialized;
+		size_t      size,
+		off;
+	}                    small;
+};
+
+
+static struct lsquic_conn_ctx *
+find_conn_h (const struct server_ctx *server_ctx, lsquic_stream_t *stream)
+{
+	struct lsquic_conn_ctx *conn_h;
+	lsquic_conn_t *conn;
+	
+	conn = lsquic_stream_conn(stream);
+	TAILQ_FOREACH(conn_h, &server_ctx->conn_ctxs, next_connh)
+	if (conn_h->conn == conn)
+	return conn_h;
+	return NULL;
+}
+
+static int
+set_nonblocking (int fd)
+{
+	int flags;
+	
+	flags = fcntl(fd, F_GETFL);
+	if (-1 == flags)
+	return -1;
+	flags |= O_NONBLOCK;
+	if (0 != fcntl(fd, F_SETFL, flags))
+	return -1;
+	
+	return 0;
+}
+
+
+static lsquic_stream_ctx_t *
+server_md5_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
+{
+	struct lsquic_conn_ctx *conn_h;
+	lsquic_stream_ctx_t *st_h = malloc(sizeof(*st_h));
+	
+	st_h->stream = stream;
+	st_h->server_ctx = stream_if_ctx;
+	
+	if (LIST_EMPTY(&st_h->server_ctx->files))
+	{
+		/* XXX: perhaps we should not be able to write immediately: there may
+		* be internal memory constraints...
+		*/
+		lsquic_stream_write(stream, "server request", 14);
+		(void)lsquic_stream_flush(stream);
+		lsquic_stream_wantread(stream, 1);
+	}
+	else
+	{
+		conn_h = find_conn_h(st_h->server_ctx, stream);
+		assert(conn_h);
+		conn_h->n_reqs++;
+		LSQ_NOTICE("request #%u", conn_h->n_reqs);
+		
+		st_h->file = LIST_FIRST(&st_h->server_ctx->files);
+		
+		if (g_write_file)
+		{
+			st_h->file->fd = -1;
+			
+			st_h->file->reader.lsqr_read = test_reader_read;
+			st_h->file->reader.lsqr_size = test_reader_size;
+			st_h->file->reader.lsqr_ctx = create_lsquic_reader_ctx(st_h->file->filename);
+			if (!st_h->file->reader.lsqr_ctx)
+			exit(1);
+		}
+		
+		else
+		{
+			printf("Check open file : %s\n", st_h->file->filename);
+			st_h->file->fd = open(st_h->file->filename, O_RDONLY);
+			if (!st_h->file->fd)
+			{
+				LSQ_ERROR("could not open %s for reading: %s",
+				st_h->file->filename, strerror(errno));
+				exit(1);
+			}
+		}
+		LIST_REMOVE(st_h->file, next_file);
+		lsquic_stream_wantwrite(stream, 1);
+	}
+	return st_h;
+}
+
+static void
+server_md5_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	char buf[0x1000];
+	memset(buf,0,sizeof(buf));
+	ssize_t nr;
+	MD5_Init(&st_h->md5ctx);
+	char * data;
+	int fd;
+	fd= open(st_h->file->filename, O_RDONLY);
+	struct stat st;
+	if (0 != fstat(fd, &st))
+	{
+		printf("cannot fstat(%s) failed: %s\n", st_h->file->filename, strerror(errno));
+		(void) close(fd);
+		return;
+	}
+	data = (char *)malloc(st.st_size);
+	nr = read(fd, data, st.st_size);
+	if (-1 == nr)
+	{
+		/* This should never return an error if we only call read() once
+		* per callback.
+		*/
+		perror("lsquic_stream_read");
+		lsquic_stream_shutdown(stream, 0);
+		return;
+	}
+	if (nr!=0)
+	{
+		
+		printf("Check NR!!\n");
+		if (g_really_calculate_md5)
+		{
+			MD5_Update(&st_h->md5ctx, data, nr);
+			MD5_Final(st_h->md5sum, &st_h->md5ctx);
+			snprintf(st_h->md5str, sizeof(st_h->md5str),
+			"%02x%02x%02x%02x%02x%02x%02x%02x"
+			"%02x%02x%02x%02x%02x%02x%02x%02x"
+			, st_h->md5sum[0]
+			, st_h->md5sum[1]
+			, st_h->md5sum[2]
+			, st_h->md5sum[3]
+			, st_h->md5sum[4]
+			, st_h->md5sum[5]
+			, st_h->md5sum[6]
+			, st_h->md5sum[7]
+			, st_h->md5sum[8]
+			, st_h->md5sum[9]
+			, st_h->md5sum[10]
+			, st_h->md5sum[11]
+			, st_h->md5sum[12]
+			, st_h->md5sum[13]
+			, st_h->md5sum[14]
+			, st_h->md5sum[15]
+			);
+		}
+		else
+		{
+			printf("Check g_really_calculate_md5!!\n");
+			st_h->md5str[sizeof(st_h->md5str) - 1] = '\0';
+		}
+		memset(st_h->md5sum, '0', sizeof(st_h->md5sum)-1);
+		md5_check_buf = 1;
+		close(fd);
+		free(data);
+	}
+}
+
+static void
+server_md5_on_write (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	ssize_t nw;
+	
+	nw = lsquic_stream_writef(stream, &st_h->file->reader);
+	server_cnt += nw;
+	if (nw < 0)
+	{
+		LSQ_ERROR("write error: %s", strerror(errno));
+		exit(1);
+	}
+	if (nw == 0)
+	{
+		destroy_lsquic_reader_ctx(st_h->file->reader.lsqr_ctx);
+		st_h->file->reader.lsqr_ctx = NULL;
+		if (0 == lsquic_stream_shutdown(st_h->stream, 1))
+		lsquic_stream_wantread(st_h->stream, 1);
+		else
+		{
+			if (ECONNRESET == errno)
+			st_h->file->file_flags |= FILE_RESET;
+			LSQ_WARN("lsquic_stream_shutdown: %s", strerror(errno));
+			lsquic_stream_close(st_h->stream);
+		}
+	}
+}
+
+static void
+server_file_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	char buf;
+	/* We expect to read in 32-character MD5 string */
+	size_t ntoread = sizeof(st_h->file->md5str) - st_h->file->md5_off;
+	if (0 == ntoread)
+	{
+		/* XXX What about an error (due to RST_STREAM) here: how are we to
+		*     handle it?
+		*/ 
+		/* Expect a FIN */
+		if (0 == lsquic_stream_read(stream, &buf, sizeof(buf)))
+		{
+			fflush(stdout);
+			lsquic_stream_shutdown(stream, 0);
+			
+		}
+		else
+		LSQ_ERROR("expected FIN from stream!");
+		
+	}
+	else
+	{
+		ssize_t nr = lsquic_stream_read(stream,
+		st_h->file->md5str + st_h->file->md5_off, ntoread);
+		if (-1 == nr)
+		{
+			if (ECONNRESET == errno)
+			st_h->file->file_flags |= FILE_RESET;
+			LSQ_WARN("lsquic_stream_read: %s", strerror(errno));
+			lsquic_stream_close(stream);
+			return;
+		}
+		else
+		st_h->file->md5_off += nr;
+	}
+	lsquic_stream_shutdown(stream, 0);
+}
+
+static void
+server_on_close (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	LSQ_NOTICE("Teansmitted file %d bytes",server_cnt);
+	struct lsquic_conn_ctx *conn_h;
+	//LSQ_NOTICE("%s called", __func__);
+	conn_h = find_conn_h(st_h->server_ctx, stream);
+	conn_h->n_closed++;
+	if (st_h->server_ctx->max_reqs &&
+	conn_h->n_closed >= st_h->server_ctx->max_reqs)
+	{
+		assert(conn_h->n_closed == st_h->server_ctx->max_reqs);
+		LSQ_NOTICE("closing connection after completing %u requests",
+		conn_h->n_closed);
+		lsquic_conn_close(conn_h->conn);
+	}
+	if (st_h->file->reader.lsqr_ctx)
+	{
+		destroy_lsquic_reader_ctx(st_h->file->reader.lsqr_ctx);
+		st_h->file->reader.lsqr_ctx = NULL;
+	}
+	if (st_h->file->fd >= 0)
+	(void) close(st_h->file->fd);
+	free(st_h->file);
+	free(st_h);
+	exit(EXIT_SUCCESS);
+}
+
+
+const struct lsquic_stream_if server_md5_stream_if = {
+	.on_new_conn            = server_on_new_conn,
+	.on_conn_closed         = server_on_conn_closed,
+	.on_new_stream          = server_md5_on_new_stream,
+	.on_read                = server_file_on_read,
+	.on_write               = server_md5_on_write,
+	.on_close               = server_on_close,
+};
+
+int quic_server(char *send_file, char *config_addr, char *config_cert)
+{
+	LSQ_NOTICE("call");
+	int s;
+	struct prog prog;
+	struct server_ctx server_ctx;
+	struct file *file;
+	
+	memset(&server_ctx, 0, sizeof(server_ctx));
+	TAILQ_INIT(&server_ctx.conn_ctxs);
+	server_ctx.prog = &prog;
+	TAILQ_INIT(&server_ctx.sports);
+	prog_init(&prog, LSENG_SERVER, &server_ctx.sports,
+	&server_md5_stream_if, &server_ctx);
+	
+	file = calloc(1, sizeof(*file));
+	LIST_INSERT_HEAD(&server_ctx.files, file, next_file);
+	++server_ctx.n_files;
+	file->filename = send_file;
+	char *cert = malloc(1024);
+	strcat(strcat(cert, "www.example.com,"), config_cert);
+	
+	if (!prog.prog_certs)
+	prog.prog_certs = lsquic_hash_create();
+	if (load_cert(prog.prog_certs, cert) != 0)
+	{
+		LSQ_ERROR("Error in certification");
+		exit(EXIT_FAILURE);
+	}
+	if (prog_add_sport(&prog, config_addr) != 0)
+	{
+		LSQ_ERROR("Error in address");
+		exit(EXIT_FAILURE);
+	}
+	if (LIST_EMPTY(&server_ctx.files))
+	{
+		fprintf(stderr, "please specify one of more files using -f\n");
+		exit(1);
+	}
+	add_alpn("staxnet");
+	if (0 != prog_prep(&prog))
+	{
+		LSQ_ERROR("could not prep");
+		exit(EXIT_FAILURE);
+	}
+	LSQ_DEBUG("entering event loop");
+	s = prog_run(&prog);
+	prog_cleanup(&prog);
+	
+	exit(0 == s ? EXIT_SUCCESS : EXIT_FAILURE);
+}
+
+\end{lstlisting}
+\begin{lstlisting} [caption=quic\_client.c]
+/* Copyright (c) 2017 - 2020 LiteSpeed Technologies Inc.  See LICENSE. */
+/*
+* md5_client.c -- This client sends one or more files to MD5 QUIC server
+*                 for MD5 sum calculation.
+*/
+
+#include <assert.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#ifndef WIN32
+#include <unistd.h>
+#include <fcntl.h>
+#else
+#include "vc_compat.h"
+#include "getopt.h"
+#endif
+
+#include <event2/event.h>
+#include "openssl/md5.h"
+
+#include "lsquic.h"
+
+
+#include "lsquic_logger.h"
+#include "lsquic_int_types.h"
+#include "lsquic_varint.h"
+#include "lsquic_hq.h"
+#include "lsquic_sfcw.h"
+#include "lsquic_hash.h"
+#include "lsquic_stream.h"
+
+#include "test_common.h"
+#include "test_cert.h"
+#include "prog.h"
+#include "staxnet.h"
+#include "internal.h"
+int cli_cnt =0;
+/* Set to non-zero value to test out what happens when reset is sent */
+#define RESET_AFTER_N_WRITES 0
+#define LOCAL_BUF_SIZE 0x100
+
+struct file {
+	LIST_ENTRY(file)        next_file;
+	const char             *filename;
+	struct lsquic_reader    reader;
+	int                     fd;
+	unsigned                priority;
+	enum {
+		FILE_RESET  = (1 << 0),
+	}                       file_flags;
+	size_t                  md5_off;
+	MD5_CTX              md5ctx;
+	char                    md5str[MD5_DIGEST_LENGTH * 2];
+};
+
+struct lsquic_conn_ctx;
+
+struct client_ctx {
+	struct lsquic_conn_ctx  *conn_h;
+	LIST_HEAD(, file)            files;
+	unsigned                     n_files;
+	struct file                 *cur_file;
+	lsquic_engine_t             *engine;
+	struct service_port         *sport;
+	struct prog                 *prog;
+	
+};
+
+struct lsquic_conn_ctx {
+	lsquic_conn_t       *conn;
+	struct client_ctx   *client_ctx;
+};
+
+
+static lsquic_conn_ctx_t *
+client_on_new_conn (void *stream_if_ctx, lsquic_conn_t *conn)
+{
+	LSQ_NOTICE("New connection!");
+	struct client_ctx *client_ctx = stream_if_ctx;
+	lsquic_conn_ctx_t *conn_h = malloc(sizeof(*conn_h));
+	conn_h->conn = conn;
+	conn_h->client_ctx = client_ctx;
+	client_ctx->conn_h = conn_h;
+	
+	assert(client_ctx->n_files > 0);
+	unsigned n = client_ctx->n_files;
+	while (n--)
+	lsquic_conn_make_stream(conn_h->conn);
+	
+	
+	print_conn_info(conn);
+	return conn_h;
+}
+
+static void
+client_on_goaway_received (lsquic_conn_t *conn)
+{
+	printf("Check GOAWAY received\n");
+	LSQ_NOTICE("GOAWAY received");
+}
+
+
+static void
+client_on_conn_closed (lsquic_conn_t *conn)
+{
+	lsquic_conn_ctx_t *conn_h = lsquic_conn_get_ctx(conn);
+	
+	LSQ_NOTICE("Connection closed");
+	prog_stop(conn_h->client_ctx->prog);
+	free(conn_h);
+}
+
+
+struct lsquic_stream_ctx {
+	lsquic_stream_t     *stream;
+	struct client_ctx   *client_ctx;
+	struct file         *file;
+	struct event        *read_stdin_ev;
+	MD5_CTX              md5ctx;
+	unsigned char        md5sum[MD5_DIGEST_LENGTH];
+	char                 md5str[MD5_DIGEST_LENGTH * 2 + 1];
+	int                  s_filename;  //filename sent flag
+	struct {
+		int         initialized;
+		size_t      size,
+		off;
+	}                    small;
+};
+
+
+static lsquic_stream_ctx_t *
+client_on_new_stream (void *stream_if_ctx, lsquic_stream_t *stream)
+{
+	lsquic_stream_ctx_t *st_h = malloc(sizeof(*st_h));
+	
+	mode_t mode;
+	mode = S_IRWXO | S_IRWXU | S_IRWXG;
+	
+	st_h->stream = stream;
+	st_h->client_ctx = stream_if_ctx;
+	lsquic_stream_wantwrite(stream, 1);
+	lsquic_stream_wantread(stream, 1);
+	
+	st_h->file = LIST_FIRST(&st_h->client_ctx->files);
+	
+	st_h->file->fd = open(st_h->file->filename, O_CREAT | O_WRONLY | O_TRUNC, mode);
+	
+	if (!st_h->file->fd)
+	{
+		LSQ_ERROR("could not open %s for writing: %s",
+		st_h->file->filename, strerror(errno));
+		exit(1);
+	}
+	LIST_REMOVE(st_h->file, next_file);
+	return st_h;
+}
+
+static void
+client_on_read (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	char buf[0x1000];
+	ssize_t nr;
+	
+	nr = lsquic_stream_read(stream, buf, sizeof(buf));
+	
+	if (-1 == nr)
+	{
+		/* This should never return an error if we only call read() once
+		* per callback.
+		*/
+		perror("lsquic_stream_read");
+		lsquic_stream_shutdown(stream, 0);
+		return;
+	}
+	
+	if (nr!=0)
+	{
+		ssize_t nw = write(st_h->file->fd, buf, nr);
+		cli_cnt += nw;
+		if (nw == 0)
+		close(st_h->file->fd);
+		else if(nw == -1)
+		perror("Write");
+		
+	}
+	else
+	{
+		lsquic_stream_wantwrite(stream, 0);
+		lsquic_stream_shutdown(stream, 0);
+	}
+}
+
+
+static void
+client_on_write (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	ssize_t nw;
+	char buf[20] = "Transmission Done";
+	nw = lsquic_stream_write(stream, buf, sizeof(buf));
+	lsquic_stream_wantwrite(stream, 0);
+	lsquic_stream_shutdown(stream, 1);
+}
+
+static void
+client_on_close (lsquic_stream_t *stream, lsquic_stream_ctx_t *st_h)
+{
+	LSQ_NOTICE("Received file %d bytes", cli_cnt);
+	--st_h->client_ctx->n_files;
+	if (0 == st_h->client_ctx->n_files)
+	lsquic_conn_close(st_h->client_ctx->conn_h->conn);
+	free(st_h);
+}
+
+
+const struct lsquic_stream_if client_file_stream_if = {
+	.on_new_conn            = client_on_new_conn,
+	.on_goaway_received     = client_on_goaway_received,
+	.on_conn_closed         = client_on_conn_closed,
+	.on_new_stream          = client_on_new_stream,
+	.on_read                = client_on_read,
+	.on_write               = client_on_write,
+	.on_close               = client_on_close,
+};
+
+
+int quic_client (char *get_file, char *server_addr)
+{
+	int s;
+	struct sport_head sports;
+	struct prog prog;
+	struct client_ctx client_ctx;
+	struct file *file;
+	
+	memset(&client_ctx, 0, sizeof(client_ctx));
+	
+	client_ctx.prog = &prog;
+	
+	TAILQ_INIT(&sports);
+	prog_init(&prog, 0, &sports, &client_file_stream_if, &client_ctx);
+	prog.prog_api.ea_alpn = "staxnet";
+	
+	file = NULL;
+	file = calloc(1, sizeof(*file));
+	LIST_INSERT_HEAD(&client_ctx.files, file, next_file);
+	++client_ctx.n_files;
+	file->filename = get_file;
+	
+	if(prog_add_sport(&prog, server_addr)!=0)
+	{
+		LSQ_ERROR("Error in certification");
+		exit(EXIT_FAILURE);
+	}
+	if (LIST_EMPTY(&client_ctx.files))
+	{
+		fprintf(stderr, "please specify one of more files using -f\n");
+		exit(1);
+	}
+	
+	if (0 != prog_prep(&prog))
+	{
+		LSQ_ERROR("could not prep");
+		exit(EXIT_FAILURE);
+	}
+	client_ctx.sport = TAILQ_FIRST(&sports);
+	
+	if (0 != prog_connect(&prog, NULL, 0))
+	{
+		LSQ_ERROR("could not connect");
+		exit(EXIT_FAILURE);
+	}
+	
+	LSQ_DEBUG("entering event loop");
+	s = prog_run(&prog);
+	prog_cleanup(&prog);
+	if(s == EXIT_SUCCESS)
+	return 0;
+	else
+	return -1;
+}
+
+
+\end{lstlisting}
